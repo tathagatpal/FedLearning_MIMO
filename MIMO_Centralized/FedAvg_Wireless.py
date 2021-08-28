@@ -46,7 +46,7 @@ class Arguments():
     def __init__(self):
         self.images = 10000
         self.clients = 30
-        self.rounds = 50
+        self.rounds = 2
         self.epochs = 5
         self.local_batches = 64
         self.lr = 0.01
@@ -120,42 +120,46 @@ def ClientUpdate(args, device, client,key_np,key):
     # std = random.randint(0,10)
     x1=random.random()
     y1=random.random()
-    h1=complex(x1,y1)
+    h1=1/math.sqrt(2) * complex(x1,y1)
     
     x2=random.random()
     y2=random.random()
-    h2=complex(x2,y2)
-    
-    x3=random.random()
-    y3=random.random()
-    h3=complex(x3,y3)
-    
-    x4=random.random()
-    y4=random.random()
-    h4=complex(x4,y4)
-    
-    norm_h = math.sqrt(x1**2 + y1**2 + x2**2 + y2**2 + x3**2 + y3**2 + x4**2 + y4**2)
-    h = np.matmul(np.matrix([h1, h2, h3, h4]) , np.matrix([np.conj(h1), np.conj(h2), np.conj(h3), np.conj(h4)]).T);
-    # x = 1/norm_h * np.matrix([np.conj(h1), np.conj(h2)]).T
-    print(h.item(0).real * 1/norm_h)
-    # print(norm_h)
+    h2=1/math.sqrt(2) * complex(x2,y2)
+
+    h = np.row_stack((h1, h2))
+    sum_h = np.sum(h,0)
+    # print(sum_h)
+
+    h_tx = np.multiply(h, np.exp(-1j*np.angle(h)))
+    sum_htx = np.sum(h_tx,0)
     
     data=client['model'].conv1.weight
     # print(data.detach().numpy())
-    data= h.item(0).real * 1/norm_h * data+ (torch.randn(data.size())*std) #channel affecting data
-    client['model'].conv1.weight.data=data
+    data1 = (complex(sum_h[0].real,sum_h[0].imag) * data) + (torch.randn(data.size())*std)  #transmit 1
+    data2 = (complex(sum_htx[0].real, sum_htx[0].imag) * data)  + (torch.randn(data.size())*std) #transmit 2
+    
+    data1 = data1/complex(sum_h[0].real,sum_h[0].imag)    #equalization 1
+    data2 = data2/complex(sum_htx[0].real,sum_htx[0].imag)  #equalization 2
+
+    client['model'].conv1.weight.data=data1.real + data2.real
+    
+    
     
     data=client['model'].conv2.weight
-    data= h.item(0).real * 1/norm_h * data + (torch.randn(data.size())*std) #channel affecting data
-    client['model'].conv2.weight.data=data
+    data1 = (complex(sum_h[0].real,sum_h[0].imag) * data) + (torch.randn(data.size())*std)  #transmit 1
+    data2 = (complex(sum_htx[0].real, sum_htx[0].imag) * data)  + (torch.randn(data.size())*std) #transmit 2
+    
+    data1 = data1/complex(sum_h[0].real,sum_h[0].imag)    #equalization 1
+    data2 = data2/complex(sum_htx[0].real,sum_htx[0].imag)  #equalization 2
+    client['model'].conv2.weight.data=data1.real + data2.real
     
     #print(client['model'].conv1.weight.size)
     client['model'].send(client['hook'])
     print("Client:",client['hook'].id)
     # print("CSI",abs(h)/(std*std))
     
-    key_np_received1=h1 *key_np+(np.random.randn(len(key_np))*std*2)
-    key_np_received1=(key_np_received1/(h1)).real
+    key_np_received1= sum_h *key_np + (np.random.randn(len(key_np))*std*2)
+    key_np_received1=(key_np_received1/(sum_h)).real
     
              
     for o in range (len(key_np_received1)):  #demodulation bpsk
@@ -168,8 +172,8 @@ def ClientUpdate(args, device, client,key_np,key):
     key_np_received1 = [int(item) for item in key_np_received1]
 
     
-    key_np_received2=h2 *key_np+(np.random.randn(len(key_np))*std*2)
-    key_np_received2=(key_np_received2/(h2)).real
+    key_np_received2=sum_htx *key_np+(np.random.randn(len(key_np))*std*2)
+    key_np_received2=(key_np_received2/(sum_htx)).real
     
              
     for o in range (len(key_np_received2)):  #demodulation bpsk
@@ -182,35 +186,7 @@ def ClientUpdate(args, device, client,key_np,key):
     key_np_received2 = [int(item) for item in key_np_received2]
     
     
-    key_np_received3=h3 *key_np+(np.random.randn(len(key_np))*std*2)
-    key_np_received3=(key_np_received3/(h3)).real
-    
-             
-    for o in range (len(key_np_received3)):  #demodulation bpsk
-        if(key_np_received3[o]>=0):
-            key_np_received3[o]=0
-        else:
-            key_np_received3[o]=1
-    
-    key_np_received3=key_np_received3.tolist()
-    key_np_received3 = [int(item) for item in key_np_received3]
-    
-    
-    key_np_received4=h4 *key_np+(np.random.randn(len(key_np))*std*2)
-    key_np_received4=(key_np_received4/(h4)).real
-    
-             
-    for o in range (len(key_np_received4)):  #demodulation bpsk
-        if(key_np_received4[o]>=0):
-            key_np_received4[o]=0
-        else:
-            key_np_received4[o]=1
-    
-    key_np_received4=key_np_received4.tolist()
-    key_np_received4 = [int(item) for item in key_np_received4]
-    
-    
-    if(sum(np.bitwise_xor(key,key_np_received1))/len(key)==0 or  sum(np.bitwise_xor(key,key_np_received2))/len(key)==0 or  sum(np.bitwise_xor(key,key_np_received3))/len(key)==0  or  sum(np.bitwise_xor(key,key_np_received4))/len(key)==0): #...............................................checking if channel is good enough for transmission by checking BER..................................
+    if(sum(np.bitwise_xor(key,key_np_received1))/len(key)==0 or  sum(np.bitwise_xor(key,key_np_received2))/len(key)==0): #...............................................checking if channel is good enough for transmission by checking BER..................................
         gc=True #considering the client model for averaging
         for epoch in range(1, args.epochs + 1):
             
